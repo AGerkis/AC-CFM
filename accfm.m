@@ -189,16 +189,21 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
             % apply recursion to every island
             island = apply_recursion(island, settings, i, 0, Gnode_name);
             
-            % store result variables
-            network.bus(ismember(network.bus_id, island.bus_id), :) = island.bus;
+            % store result
+            % variables%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%ADDED TO LINES 193 197 199 THE INDEXING - Dynamically shapes arrays to appropriate size
+            try
+            network.bus(ismember(network.bus_id, island.bus_id), :) = island.bus(:, 1:length(network.bus(1, :)));
             network.bus_tripped(ismember(network.bus_id, island.bus_id), :) = island.bus_tripped;
             network.bus_uvls(ismember(network.bus_id, island.bus_id), :) = island.bus_uvls;
             network.bus_ufls(ismember(network.bus_id, island.bus_id), :) = island.bus_ufls;
-            network.gen(ismember(network.gen_id, island.gen_id), :) = island.gen;
+            network.gen(ismember(network.gen_id, island.gen_id), :) = island.gen(:, 1:length(network.gen(1, :)));
             network.gen_tripped(ismember(network.gen_id, island.gen_id), :) = island.gen_tripped;
-            network.branch(ismember(network.branch_id, island.branch_id), :) = island.branch;
+            network.branch(ismember(network.branch_id, island.branch_id), :) = island.branch(:, 1:length(network.branch(1, :)));
             network.branch_tripped(ismember(network.branch_id, island.branch_id), :) = island.branch_tripped;
-            
+            catch err
+                disp(err);
+                disp("nuts");
+            end
             network.load(i:end) = network.load(i:end) + island.load(i:end);
             
             network.pf_count = network.pf_count + island.pf_count;
