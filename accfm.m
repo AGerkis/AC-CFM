@@ -11,6 +11,9 @@ function result_cascade = accfm(network, initial_contingency, settings)
 
     % define matpower constants
     define_constants;
+
+    % define constants for saving summary
+    get_constants_accfmsave;
     
     % load empty initial contingency if no other specified
     if ~exist('initial_contingency', 'var') || ~isstruct(initial_contingency)
@@ -57,6 +60,50 @@ function result_cascade = accfm(network, initial_contingency, settings)
     network.generation_before = sum(network.gen(:, PG));
     network.pf_count = 0;
     
+    % add output structure
+    network.accfm_summary = struct();
+    network.accfm_summary.n_islands = 1; % Initially we have one island
+    network.accfm_summary.n_cascades = 0;
+    
+    branches = zeros(size(network.branch, 1), 6); % Create structure with branch status
+    branch = struct(); % Store information about branches
+    branch.id = 0; % Assign ID
+    branch.from = 0; % From bus
+    branch.to = 0; % To bus
+    branch.status = 0;% Status - 0: disconnected, 1: connected
+    branch.failure_mode = zeros(1, settings.max_recursion_depth); % Failure mode experienced at each recursion
+    branch.dP = zeros(1, settings.max_recursion_depth); % Amount by which active power threshold was exceed at each recursion
+    
+    branches = repmat(branch, 1, length(network.branch(:, 1)));
+
+    for i=1:length(branches) % Assign IDs and to/from info to each branch
+        branches(i).id = i; % Assign ID
+        branches(i).to = network.branch(i, 1); % From bus
+        branches(i).from = network.branch(i, 2); % To bus
+        branches(i).status = network.branch(i, 11); % Status - 0: disconnected, 1: connected
+    end
+    
+    bus = struct(); % Store information about busses
+    bus.id = 0; % Assign ID
+    bus.type = 0; % Bus type - 1: PQ, 2: PV, 3: Reference, 4: Isolated
+    bus.status = 1; % Status - 0: disconnected, 1: connected, 2: connected with load shed
+    bus.ls_applied = zeros(2, settings.max_recursion_depth); % Load shed applied at each recursion
+    bus.failure_mode = zeros(1, settings.max_recursion_depth); % Failure mode experienced at each recursion
+    bus.dG = zeros(1, settings.max_recursion_depth); % Amount by which generation threshold was exceed at each recursion
+    bus.dP = zeros(1, settings.max_recursion_depth); % Amount by which active power threshold was exceed at each recursion
+    bus.dQ = zeros(1, settings.max_recursion_depth); % Amount by which real power threshold was exceed at each recursion
+    bus.dV = zeros(1, settings.max_recursion_depth); % Amount by which voltage threshold was exceed at each recursion
+    
+    busses = repmat(bus, 1, size(network.bus, 1));
+
+    for i=1:length(busses) % Assign IDs to each bus
+        busses(i).id = network.bus(i, 1); % Assign ID
+        busses(i).type = network.bus(i, 2); % Assign type
+    end
+    
+    network.accfm_summary.branches = branches;
+    network.accfm_summary.busses = busses;
+
     % add custom fields to include in MATPOWER case structs
     settings.custom.bus{1} = {'bus_id', 'bus_tripped', 'bus_uvls', 'bus_ufls'};
     settings.custom.gen{1} = {'gen_id', 'gen_tripped'};
@@ -120,6 +167,9 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
 
     % define MATPOWER constants
     define_constants;
+    
+    % define constants for saving summary
+    get_constants_accfmsave;
 
     % default values
     if ~exist('i', 'var')
@@ -139,6 +189,8 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
         error('Iteration limit reached');
     end
     
+    network.accfm_summary.n_cascades = network.accfm_summary.n_cascades + 1; % Increment number of cascade steps
+
     % find all islands
     [groups, isolated] = find_islands(network);
     isolated = num2cell(isolated);
@@ -151,7 +203,9 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
         islands = [groups(:)', isolated(:)'];
         %islands = {groups{:}, isolated{:}};
     end
-    
+
+    network.accfm_summary.n_islands = network.accfm_summary.n_islands + length(islands); % Increment number of islands
+
     % if there is more than one island, iterate through all of them
     % SIBLING CASE
     if length(islands) > 1
@@ -202,7 +256,25 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
             network.load(i:end) = network.load(i:end) + island.load(i:end);
             
             network.pf_count = network.pf_count + island.pf_count;
+
+            network.accfm_summary.n_cascades = network.accfm_summary.n_cascades + 1; % Increment number of cascade steps
+            network.accfm_summary.n_islands = network.accfm_summary.n_islands + length(islands); % Increment number of islands
             
+            new_branch_inds = boolean(zeros(1, length(network.accfm_summary.branches))); % Store indices of changed branches
+            
+            for l=1:length(new_branch_inds) % Find indices of changed branches
+                new_branch_inds(l) = ~isequal(island.accfm_summary.branches(l), network.accfm_summary.branches(l));
+            end
+
+            new_bus_inds = boolean(zeros(1, length(network.accfm_summary.busses))); % Store indices of changed busses
+            
+            for l=1:length(new_bus_inds) % Find indices of changed branches
+                new_bus_inds(l) = ~isequal(island.accfm_summary.busses(l), network.accfm_summary.busses(l));
+            end
+
+            network.accfm_summary.branches(new_branch_inds) = island.accfm_summary.branches(new_branch_inds); % Update branch values
+            network.accfm_summary.busses(new_bus_inds) = island.accfm_summary.busses(new_bus_inds); % Update branch values
+
             network.G = island.G;
         end
         
@@ -210,7 +282,8 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
     elseif length(islands) == 1
         
         Gnode_name = '';
-        
+        bus_ind = network.bus(:, BUS_I); % Extract indices of busses
+
         %network_before = network;
             
         % deactivate all buses if there is
@@ -227,6 +300,10 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
             
             network = trip_nodes(network, network.bus(:, BUS_I));
             network.bus_tripped(:, i) = 1;
+
+            for l=1:length(bus_ind) % Update status of tripped busses
+                network.accfm_summary.busses(bus_ind(l)).failure_mode(i) = OTHER;
+            end
             
             if settings.verbose
                 fprintf(repmat(' ', 1, i - k))
@@ -338,6 +415,14 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                         network.bus(:, [PD QD]) = ls_factor * network.bus(:, [PD QD]);
                         network.bus_ufls(:, i) = 1 - ls_factor;
                         
+                        network.accfm_summary.dG(i) = dG; % Store change in generation
+                        
+                        for l=1:length(bus_ind) % Store amount of load shed at each bus
+                            network.accfm_summary.busses(bus_ind(l)).ls_applied(:, i) = (1 - ls_factor)*network.bus(network.bus(:, BUS_I) == bus_ind(l), [PD QD]);
+                            network.accfm_summary.busses(bus_ind(l)).status = LOAD_SHED;
+                            network.accfm_summary.busses(bus_ind(l)).failure_mode(i) = UFLS;
+                        end
+                        
                         network = runpf(network, settings.mpopt);
                         network.pf_count = network.pf_count + 1;
 
@@ -388,6 +473,12 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                         
                         network = add_reference_bus(network);
                         
+                        for l=1:gens_to_shed % Store index at which generator was shed and update status
+                            network.accfm_summary.busses(network.gen(ind(l), GEN_BUS)).status = FAILED;
+                            network.accfm_summary.busses(network.gen(ind(l), GEN_BUS)).failure_mode(i) = OFGS;
+                            network.accfm_summary.busses(network.gen(ind(l), GEN_BUS)).dG(i) = dG; % Store change in generation
+                        end
+
                         if ~isempty(find(network.gen(:, GEN_STATUS) == 1, 1))
                             network = runpf(network, settings.mpopt);
                             network.pf_count = network.pf_count + 1;
@@ -419,6 +510,15 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                 exceeded_gens_p = find(round(network.gen(:, PG), 5) < network.gen(:, PMIN) & network.gen(:, GEN_STATUS) == 1);
                 exceeded_gens_q = find((round(network.gen(:, QG) - network.gen(:, QMIN), 5) < -abs(settings.Q_tolerance * network.gen(:, QMIN)) | round(network.gen(:, QG) - network.gen(:, QMAX), 5) > abs(settings.Q_tolerance * network.gen(:, QMAX))) & network.gen(:, GEN_STATUS) == 1);
                 
+                % compute distances from threshold boundaries
+                threshold_deltas_lines = round(mean([sqrt(network.branch(exceeded_lines, PF).^2 + network.branch(exceeded_lines, QF).^2) sqrt(network.branch(exceeded_lines, PT).^2 + network.branch(exceeded_lines, QT).^2)], 2), 5) - round(network.branch(exceeded_lines, RATE_A) * 1.01, 5);
+                threshold_deltas_busses = (round(network.bus(exceeded_buses, VM), 3) - network.bus(exceeded_buses, VMIN));
+                threshold_deltas_p = (round(network.gen(exceeded_gens_p, PG), 5) - network.gen(exceeded_gens_p, PMIN));
+                l_bound_q = round(network.gen(exceeded_gens_q, QG) - network.gen(exceeded_gens_q, QMIN), 5) + abs(settings.Q_tolerance * network.gen(exceeded_gens_q, QMIN)); % Check lower boundary. Will be less than 0 if exceeded
+                u_bound_q = -1*round(network.gen(exceeded_gens_q, QG) + network.gen(exceeded_gens_q, QMAX), 5) + abs(settings.Q_tolerance * network.gen(exceeded_gens_q, QMAX)); % Check upper boundary. Will be less than 0 if exceeded
+                [threshold_deltas_q, sgn] = min([u_bound_q, zeros(size(l_bound_q, 1), 1), l_bound_q]); % Index is used to correct sign
+                threshold_deltas_q = (sgn - 2).*threshold_deltas_q; % Correct sign so the upper bound is positive
+
                 %% O/UXL
                 
                 % exceeded generator Q limits
@@ -427,12 +527,20 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                     
                     if size(network.bus, 1) == 1
                         ls_factor = sum(network.gen(gens, QMAX)) / sum(network.gen(gens, QG));
-                        
+                        fail_mode = OXL;
+
                         if ls_factor < 0
                             ls_factor = sum(network.gen(gens, QMIN)) / sum(network.gen(gens, QG));
+                            fail_mode = UXL;
                         end
                         
                         network.bus(:, [PD QD]) = ls_factor * network.bus(:, [PD QD]);
+                        
+                        % Save the over power threshold, bus status, and amount of load shed
+                        network.accfm_summary.busses(bus_ind(1)).dQ(i) = threshold_deltas_q;
+                        network.accfm_summary.busses(bus_ind(1)).ls_applied(1, i) = (1 - ls_factor) * network.bus(:, [PD QD]);
+                        network.accfm_summary.busses(bus_ind(1)).status = LOAD_SHED;
+                        network.accfm_summary.busses(bus_ind(1)).failure_mode(i) = fail_mode;
                     else
                         % convert buses to PQ
                         network.bus(network.bus(:, BUS_TYPE) ~= NONE & ismember(network.bus(:, BUS_I), network.gen(exceeded_gens_q, GEN_BUS)), BUS_TYPE) = PQ;
@@ -440,6 +548,20 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                         % set Q output to closest limit
                         network.gen(intersect(exceeded_gens_q, find(network.gen(:, QG) < network.gen(:, QMIN))), QG) = network.gen(intersect(exceeded_gens_q, find(network.gen(:, QG) < network.gen(:, QMIN))), QMIN);
                         network.gen(intersect(exceeded_gens_q, find(network.gen(:, QG) > network.gen(:, QMAX))), QG) = network.gen(intersect(exceeded_gens_q, find(network.gen(:, QG) > network.gen(:, QMAX))), QMAX);
+                    
+                        ind_changed = find(network.bus(:, BUS_TYPE) ~= NONE & ismember(network.bus(:, BUS_I), network.gen(exceeded_gens_q, GEN_BUS)));
+
+                        for l=1:length(ind_changed) % Save bus status and amount of load shed
+                            network.accfm_summary.busses(ind_changed(l)).ls_applied(2, i)  = threshold_deltas_q(l);
+                            network.accfm_summary.busses(ind_changed(l)).dQ(i) = threshold_deltas_q(l);
+                            network.accfm_summary.busses(ind_changed(l)).type = PQ;
+                            network.accfm_summary.busses(ind_changed(l)).status = LOAD_SHED;
+                            if threshold_deltas_q(l) < 0 % If negative then UXL was applied
+                                network.accfm_summary.busses(network.bus(ind_changed(l), BUS_I)).failure_mode(i) = UXL;
+                            else % Otherwise OXL was applied
+                                network.accfm_summary.busses(network.bus(ind_changed(l), BUS_I)).failure_mode(i) = OXL;
+                            end
+                        end
                     end
                     
                     if settings.verbose
@@ -472,6 +594,12 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
 
                     network = add_reference_bus(network);
                     
+                    for l=1:length(exceeded_gens_p) % Save bus state and over threshold amount
+                        network.accfm_summary.busses(network.bus(exceeded_gens_p(l), BUS_I)).dP(i) = threshold_deltas_p(l);
+                        network.accfm_summary.busses(network.bus(exceeded_gens_p(l), BUS_I)).status = FAILED;
+                        network.accfm_summary.busses(network.bus(exceeded_gens_p(l), BUS_I)).failure_mode(i) = ULGT;
+                    end
+
                     if settings.verbose
                         fprintf(repmat(' ', 1, i - k))
                         fprintf(' Generators at buses tripped due to underload');
@@ -511,6 +639,13 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                         network.bus_uvls(buses_uvls_apply, i) = (settings.uvls_per_step ./ (1 - settings.uvls_per_step * uvls_steps_applied(buses_uvls_apply)));
                         
                         network.bus(buses_uvls_apply, [PD QD]) = (1 - network.bus_uvls(buses_uvls_apply, i)) .* network.bus(buses_uvls_apply, [PD QD]);
+                        
+                        for l=1:length(buses_uvls_apply) % Save bus state and over threshold amount
+                            network.accfm_summary.busses(network.bus(buses_uvls_apply(l), BUS_I)).dV(i) = threshold_deltas_busses(l);
+                            network.accfm_summary.busses(network.bus(buses_uvls_apply(l), BUS_I)).ls_applied(:, i) = (network.bus_uvls(buses_uvls_apply(l), i)) .* network.bus(buses_uvls_apply(l), [PD QD]);
+                            network.accfm_summary.busses(network.bus(buses_uvls_apply(l), BUS_I)).status = LOAD_SHED;
+                            network.accfm_summary.busses(network.bus(buses_uvls_apply(l), BUS_I)).failure_mode(i) = UVLS;
+                        end
 
                         if settings.verbose
                             fprintf(repmat(' ', 1, i - k))
@@ -528,6 +663,12 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                         network.bus(buses_uvls_exceeded, QD) = 0;
                         
                         network.bus_uvls(buses_uvls_exceeded, i) = 1;
+                        
+                        for l=1:length(buses_uvls_exceeded) % Save bus state
+                            network.accfm_summary.busses(network.bus(buses_uvls_apply(l), BUS_I)).ls_applied(:, i) = NaN;
+                            network.accfm_summary.busses(network.bus(buses_uvls_exceeded(l), BUS_I)).status = FAILED;
+                            network.accfm_summary.busses(network.bus(buses_uvls_exceeded(l), BUS_I)).failure_mode(i) = UVLS;
+                        end
 
                         if settings.verbose
                             fprintf(repmat(' ', 1, i - k))
@@ -554,6 +695,12 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                     
                     network.branch(exceeded_lines, BR_STATUS) = 0;
                     network.branch_tripped(exceeded_lines, i) = 1;
+                    
+                    for l=1:length(exceeded_lines) % Save branch state and overpower threshold amount
+                        network.accfm_summary.branches(exceeded_lines(l)).dP(i) = threshold_deltas_lines(l);
+                        network.accfm_summary.branches(exceeded_lines(l)).status = FAILED;
+                        network.accfm_summary.branches(exceeded_lines(l)).failure_mode(i) = OLP;
+                    end
 
                     if settings.verbose
                         fprintf(repmat(' ', 1, i - k))
@@ -613,6 +760,9 @@ function [network, tripped_lines] = trip_nodes(network, nodes)
 % fixed demand to 0 and trips all branches connected to the nodes.
 
     define_constants;
+    
+    % define constants for saving summary
+    get_constants_accfmsave;
 
     % set bus type to isolated
     network.bus(ismember(network.bus(:, BUS_I), nodes), BUS_TYPE) = NONE;
@@ -731,7 +881,10 @@ function [network, Gnode_parent] = apply_vcls(network, settings, Gnode_parent, i
 % that need to be shed in order to make the power flow solvable again.
     
     define_constants;
-
+    
+    % define constants for saving summary
+    get_constants_accfmsave;
+    
     % make a copy of the network, get total load
     network_disp = network;
     load_initial = sum(network.bus(:, PD));
@@ -809,6 +962,13 @@ function [network, Gnode_parent] = apply_vcls(network, settings, Gnode_parent, i
 
         network = trip_nodes(network, network.bus(:, BUS_I));
         network.bus_tripped(:, i) = 1;
+        
+        bus_ind = network.bus(:, BUS_I); % Get IDs of busses in current island
+
+        for l=1:bus_ind % Update bus status
+            network.accfm_summary.busses(l).status = FAILED;
+            network.accfm_summary.busses(l).failure_mode(i) = VCLS;
+        end
 
         Gnode_name = get_hash();
         network.G = addnode(network.G, table({Gnode_name}, size(network.bus, 1), {'failure'}, 0, 0, 0, 'VariableNames', {'Name', 'Buses', 'Type', 'Load', 'Generators', 'Lines'}));
@@ -823,6 +983,9 @@ function [network, Gnode_parent, opf_success] = apply_opf(network, network_disp,
 
     define_constants;
     
+    % define constants for saving summary
+    get_constants_accfmsave;
+
     load_initial = sum(network.bus(:, PD));
 
     % use a faster OPF solver if available
@@ -843,6 +1006,9 @@ function [network, Gnode_parent, opf_success] = apply_opf(network, network_disp,
         % determine which loads to shed
         loads_shed = find(results_disp.gen(:, PMIN) < 0 & round(results_disp.gen(:, PG)) > round(results_disp.gen(:, PMIN)));
         
+        % save change in demand before and after OPF
+        deltas_pq = network.bus(:, [PD, QD]) - results_disp.bus(:, [PD, QD]);
+
         ls = 0;
         if ~isempty(loads_shed)
 
@@ -853,6 +1019,14 @@ function [network, Gnode_parent, opf_success] = apply_opf(network, network_disp,
 
             network.bus(ismember(network.bus(:, BUS_I), results_disp.gen(results_disp.gen(:, PMIN) < 0, GEN_BUS)), PD) = -results_disp.gen(results_disp.gen(:, PMIN) < 0, PG);
             network.bus(ismember(network.bus(:, BUS_I), results_disp.gen(results_disp.gen(:, PMIN) < 0, GEN_BUS)), QD) = -results_disp.gen(results_disp.gen(:, PMIN) < 0, QG);
+            
+            ind_changed = find(ismember(network.bus(:, BUS_I), results_disp.gen(results_disp.gen(:, PMIN) < 0, GEN_BUS))); % Get indices that have been changed
+
+            for l=1:length(ind_changed) % Save bus state and over power threshold
+                network.accfm_summary.busses(network.bus(ind_changed(l), BUS_I)).ls_applied(:, i) = deltas_pq(ind_changed(l), :)';
+                network.accfm_summary.busses(network.bus(ind_changed(l), BUS_I)).status = LOAD_SHED;
+                network.accfm_summary.busses(network.bus(ind_changed(l), BUS_I)).failure_mode(i) = VCLS;
+            end
 
             if settings.verbose
                 fprintf(repmat(' ', 1, i - k))
@@ -888,6 +1062,13 @@ function [network, Gnode_parent, opf_success] = apply_opf(network, network_disp,
 
             network = trip_nodes(network, network.bus(:, BUS_I));
             network.bus_tripped(:, i) = 1;
+            
+            bus_ind = network.bus(:, BUS_I); % Get indices of busses in current island
+
+            for l=1:length(bus_ind) % Save bus state, no other information (there are no thresholds to save, it just doesn't converge)
+                network.accfm_summary.busses(bus_ind(l)).status = FAILED;
+                network.accfm_summary.busses(bus_ind(l)).failure_mode(i) = VCLS;
+            end
 
             Gnode_name = get_hash();
             network.G = addnode(network.G, table({Gnode_name}, size(network.bus, 1), {'failure'}, 0, 0, 0, 'VariableNames', {'Name', 'Buses', 'Type', 'Load', 'Generators', 'Lines'}));
