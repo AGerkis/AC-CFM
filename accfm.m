@@ -64,8 +64,8 @@ function result_cascade = accfm(network, initial_contingency, settings)
     network.accfm_summary = struct();
     network.accfm_summary.n_islands = 1; % Initially we have one island
     network.accfm_summary.n_cascades = 0;
-    
-    branches = zeros(size(network.branch, 1), 6); % Create structure with branch status
+    network.accfm_summary.dG = zeros(1, settings.max_recursion_depth); % Save change in generation at each recursion
+
     branch = struct(); % Store information about branches
     branch.id = 0; % Assign ID
     branch.from = 0; % From bus
@@ -472,7 +472,8 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                         network.bus(ismember(network.bus(:, BUS_I), setdiff(pv_buses, buses_with_active_generation)), BUS_TYPE) = PQ;
                         
                         network = add_reference_bus(network);
-                        
+                        network.accfm_summary.dG(i) = dG;
+
                         for l=1:gens_to_shed % Store index at which generator was shed and update status
                             network.accfm_summary.busses(network.gen(ind(l), GEN_BUS)).status = FAILED;
                             network.accfm_summary.busses(network.gen(ind(l), GEN_BUS)).failure_mode(i) = OFGS;
@@ -665,7 +666,7 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                         network.bus_uvls(buses_uvls_exceeded, i) = 1;
                         
                         for l=1:length(buses_uvls_exceeded) % Save bus state
-                            network.accfm_summary.busses(network.bus(buses_uvls_apply(l), BUS_I)).ls_applied(:, i) = NaN;
+                            network.accfm_summary.busses(network.bus(buses_uvls_exceeded(l), BUS_I)).ls_applied(:, i) = NaN;
                             network.accfm_summary.busses(network.bus(buses_uvls_exceeded(l), BUS_I)).status = FAILED;
                             network.accfm_summary.busses(network.bus(buses_uvls_exceeded(l), BUS_I)).failure_mode(i) = UVLS;
                         end
