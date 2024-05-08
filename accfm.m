@@ -93,7 +93,8 @@ function result_cascade = accfm(network, initial_contingency, settings)
     bus.dP = zeros(1, settings.max_recursion_depth); % Amount by which active power threshold was exceed at each recursion
     bus.dQ = zeros(1, settings.max_recursion_depth); % Amount by which real power threshold was exceed at each recursion
     bus.dV = zeros(1, settings.max_recursion_depth); % Amount by which voltage threshold was exceed at each recursion
-    
+    bus.vcls_ds = zeros(2, settings.max_recursion_depth); % Amount of vcls applied at each recursion
+
     busses = repmat(bus, 1, size(network.bus, 1));
 
     for i=1:length(busses) % Assign IDs to each bus
@@ -1010,12 +1011,11 @@ function [network, Gnode_parent, opf_success] = apply_opf(network, network_disp,
 
         % determine which loads to shed
         loads_shed = find(results_disp.gen(:, PMIN) < 0 & round(results_disp.gen(:, PG)) > round(results_disp.gen(:, PMIN)));
-        
-        % save change in demand before and after OPF
-        deltas_pq = network.bus(:, [PD, QD]) - results_disp.bus(:, [PD, QD]);
 
         ls = 0;
         if ~isempty(loads_shed)
+            % save change load in network
+            prev_pq = network.bus(:, [PD, QD]);
 
             % apply VCLS
             ls = 1 - sum(-results_disp.gen(results_disp.gen(:, PMIN) < 0, PG)) / sum(-results_disp.gen(results_disp.gen(:, PMIN) < 0, PMIN));
@@ -1026,9 +1026,10 @@ function [network, Gnode_parent, opf_success] = apply_opf(network, network_disp,
             network.bus(ismember(network.bus(:, BUS_I), results_disp.gen(results_disp.gen(:, PMIN) < 0, GEN_BUS)), QD) = -results_disp.gen(results_disp.gen(:, PMIN) < 0, QG);
             
             ind_changed = find(ismember(network.bus(:, BUS_I), results_disp.gen(results_disp.gen(:, PMIN) < 0, GEN_BUS))); % Get indices that have been changed
+            deltas_pq = -results_disp.gen(results_disp.gen(:, PMIN) < 0, [PG, QG]); % Get changes in power
 
             for l=1:length(ind_changed) % Save bus state and over power threshold
-                network.accfm_summary.busses(network.bus(ind_changed(l), BUS_I)).ls_applied(:, i) = deltas_pq(ind_changed(l), :)';
+                network.accfm_summary.busses(network.bus(ind_changed(l), BUS_I)).vcls_ds(:, i) = prev_pq(ind_changed(l), :)' - deltas_pq(l, :)'; % Amount of load shed (should always be positive
                 network.accfm_summary.busses(network.bus(ind_changed(l), BUS_I)).status = LOAD_SHED;
                 network.accfm_summary.busses(network.bus(ind_changed(l), BUS_I)).failure_mode(i) = VCLS;
             end
