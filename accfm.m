@@ -260,6 +260,10 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
             network.accfm_summary.n_cascades = network.accfm_summary.n_cascades + 1; % Increment number of cascade steps
             network.accfm_summary.n_islands = network.accfm_summary.n_islands + length(islands); % Increment number of islands
             
+            % Update indices of generation variables that have changed
+            ind_changed_dg = ~isequal(network.accfm_summary.dG, island.accfm_summary.dG);
+            network.accfm_summary.dG(ind_changed_dg) = island.accfm_summary.dG(ind_changed_dg);
+
             new_branch_inds = boolean(zeros(1, length(network.accfm_summary.branches))); % Store indices of changed branches
             
             for l=1:length(new_branch_inds) % Find indices of changed branches
@@ -506,7 +510,7 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
             if ~conditions_changed
                 
                 % get exceeded branches, buses and generators
-                exceeded_lines = find(round(mean([sqrt(network.branch(:, PF).^2 + network.branch(:, QF).^2) sqrt(network.branch(:, PT).^2 + network.branch(:, QT).^2)], 2), 5) > round(network.branch(:, RATE_A) * 1.01, 5));
+                exceeded_lines = find(round(mean([sqrt(network.branch(:, PF).^2 + network.branch(:, QF).^2) sqrt(network.branch(:, PT).^2 + network.branch(:, QT).^2)], 2), 5) > round(network.branch(:, RATE_A) * 1.01, 5) & network.branch(:, RATE_A) ~= 0);
                 exceeded_buses = find(network.bus(:, BUS_TYPE) ~= NONE & (round(network.bus(:, VM), 3) < network.bus(:, VMIN)) & (network.bus(:, PD) > 0 | network.bus(:, QD) > 0));
                 exceeded_gens_p = find(round(network.gen(:, PG), 5) < network.gen(:, PMIN) & network.gen(:, GEN_STATUS) == 1);
                 exceeded_gens_q = find((round(network.gen(:, QG) - network.gen(:, QMIN), 5) < -abs(settings.Q_tolerance * network.gen(:, QMIN)) | round(network.gen(:, QG) - network.gen(:, QMAX), 5) > abs(settings.Q_tolerance * network.gen(:, QMAX))) & network.gen(:, GEN_STATUS) == 1);
