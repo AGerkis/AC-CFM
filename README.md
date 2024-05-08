@@ -1,5 +1,5 @@
 # AC-CFM
-AC cascading failure model based on MATPOWER for resilience analysis of power networks.
+AC cascading failure model based on MATPOWER for resilience analysis of power networks. Largely copied from the the [original repo](https://github.com/mnoebels/AC-CFM) with minor bug fixes and the addition of more detailed outputs for analysis of the cascading process.
 
 ## Licensing and Citing
 
