@@ -516,6 +516,18 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                 exceeded_gens_p = find(round(network.gen(:, PG), 5) < network.gen(:, PMIN) & network.gen(:, GEN_STATUS) == 1);
                 exceeded_gens_q = find((round(network.gen(:, QG) - network.gen(:, QMIN), 5) < -abs(settings.Q_tolerance * network.gen(:, QMIN)) | round(network.gen(:, QG) - network.gen(:, QMAX), 5) > abs(settings.Q_tolerance * network.gen(:, QMAX))) & network.gen(:, GEN_STATUS) == 1);
                 
+                %% CHECK CONDITIONS FOR ACTIVATING CONTROL
+                % value > threshold + time constraint?
+
+                %% Apply LS control
+                % find busses that connect to exceeded_lines
+                % Decrease load as much as possible busses
+                % Recheck thresholds -> exceeded_lines = find(round(mean([sqrt(network.branch(:, PF).^2 + network.branch(:, QF).^2) sqrt(network.branch(:, PT).^2 + network.branch(:, QT).^2)], 2), 5) > round(network.branch(:, RATE_A) * 1.01, 5) & network.branch(:, RATE_A) ~= 0);
+                
+                %% Decrease power @ bus i
+                % network.bus(i, BUS_TYPE) = desired bus (1 for PQ, 2 for PV);
+                % network.bus(i, PD) = 0.75*network.bus(i, PD);
+
                 % compute distances from threshold boundaries
                 threshold_deltas_lines = round(mean([sqrt(network.branch(exceeded_lines, PF).^2 + network.branch(exceeded_lines, QF).^2) sqrt(network.branch(exceeded_lines, PT).^2 + network.branch(exceeded_lines, QT).^2)], 2), 5) - round(network.branch(exceeded_lines, RATE_A) * 1.01, 5);
                 threshold_deltas_busses = (round(network.bus(exceeded_buses, VM), 3) - network.bus(exceeded_buses, VMIN));
