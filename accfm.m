@@ -73,7 +73,8 @@ function result_cascade = accfm(network, initial_contingency, settings)
     branch.status = 0;% Status - 0: disconnected, 1: connected
     branch.failure_mode = zeros(1, settings.max_recursion_depth); % Failure mode experienced at each recursion
     branch.dP = zeros(1, settings.max_recursion_depth); % Amount by which active power threshold was exceed at each recursion
-    
+    branch.p_init = 0; % Power flow in line before current cascade
+
     branches = repmat(branch, 1, length(network.branch(:, 1)));
 
     for i=1:length(branches) % Assign IDs and to/from info to each branch
@@ -94,12 +95,14 @@ function result_cascade = accfm(network, initial_contingency, settings)
     bus.dQ = zeros(1, settings.max_recursion_depth); % Amount by which real power threshold was exceed at each recursion
     bus.dV = zeros(1, settings.max_recursion_depth); % Amount by which voltage threshold was exceed at each recursion
     bus.vcls_ds = zeros(2, settings.max_recursion_depth); % Amount of vcls applied at each recursion
+    bus.p_init = 0; % Power in bus before cascade
 
     busses = repmat(bus, 1, size(network.bus, 1));
 
     for i=1:length(busses) % Assign IDs to each bus
         busses(i).id = network.bus(i, 1); % Assign ID
         busses(i).type = network.bus(i, 2); % Assign type
+        busses(i).p_init = network.bus(i, PD); % Assign initial demand
     end
     
     network.accfm_summary.branches = branches;
@@ -377,6 +380,12 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                 end
             end
             
+            if nargin == 2 % Save initial power at first step of cascade
+                for j=1:length(network.accfm_summary.branches) % Assign IDs and to/from info to each branch
+                    network.accfm_summary.branches(j).p_init = network.branch(j, PF); % Power flowing through branch
+                end
+            end
+
             %% UFLS / OFGS
             
             % PF converged
