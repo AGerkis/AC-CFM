@@ -246,7 +246,7 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
             
             % apply recursion to every island
             island = apply_recursion(island, settings, i, 0, Gnode_name);
-            
+
             % store result variables - Added code to dynamically shape arrays to appropriate size
             network.bus(ismember(network.bus_id, island.bus_id), :) = island.bus(:, 1:length(network.bus(1, :)));
             network.bus_tripped(ismember(network.bus_id, island.bus_id), :) = island.bus_tripped;
@@ -531,7 +531,7 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                 threshold_deltas_p = (round(network.gen(exceeded_gens_p, PG), 5) - network.gen(exceeded_gens_p, PMIN));
                 l_bound_q = round(network.gen(exceeded_gens_q, QG) - network.gen(exceeded_gens_q, QMIN), 5) + abs(settings.Q_tolerance * network.gen(exceeded_gens_q, QMIN)); % Check lower boundary. Will be less than 0 if exceeded
                 u_bound_q = -1*round(network.gen(exceeded_gens_q, QG) + network.gen(exceeded_gens_q, QMAX), 5) + abs(settings.Q_tolerance * network.gen(exceeded_gens_q, QMAX)); % Check upper boundary. Will be less than 0 if exceeded
-                [threshold_deltas_q, sgn] = min([u_bound_q, zeros(size(l_bound_q, 1), 1), l_bound_q]); % Index is used to correct sign
+                [threshold_deltas_q, sgn] = min([u_bound_q, zeros(size(l_bound_q, 1), 1), l_bound_q], [], 2); % Index is used to correct sign
                 threshold_deltas_q = (sgn - 2).*threshold_deltas_q; % Correct sign so the upper bound is positive
 
                 %% O/UXL
