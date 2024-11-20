@@ -33,8 +33,13 @@ function network = distribute_slack(network, network_prev, settings)
     
     % run a power flow
     network = runpf(network, settings.mpopt);
-    network.pf_count = network.pf_count + 1;
 
+    if isfield(network, "pf_count")
+        network.pf_count = network.pf_count + 1;
+    else
+        network.pf_count = 0;
+    end
+    
     % it might be that some generators now exceed their capacity
     while ~isempty(find(network.gen(:, PG) > network.gen(:, PMAX), 1)) || ~isempty(find(network.gen(:, PG) < network.gen(:, PMIN) & network.gen(:, GEN_STATUS) == 1, 1))
         % this is the total exceeding generation
