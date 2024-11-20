@@ -553,7 +553,7 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                         
                         % Save the over power threshold, bus status, and amount of load shed
                         network.accfm_summary.busses(bus_ind(1)).dQ(i) = threshold_deltas_q;
-                        network.accfm_summary.busses(bus_ind(1)).ls_applied(1, i) = (1 - ls_factor) * network.bus(:, [PD QD]);
+                        network.accfm_summary.busses(bus_ind(1)).ls_applied(:, i) = (1 - ls_factor) * network.bus(:, [PD QD]);
                         network.accfm_summary.busses(bus_ind(1)).status = LOAD_SHED;
                         network.accfm_summary.busses(bus_ind(1)).failure_mode(i) = fail_mode;
                     else
@@ -680,7 +680,7 @@ function network = apply_recursion(network, settings, i, k, Gnode_parent)
                         network.bus_uvls(buses_uvls_exceeded, i) = 1;
                         
                         for l=1:length(buses_uvls_exceeded) % Save bus state
-                            network.accfm_summary.busses(network.bus(buses_uvls_exceeded(l), BUS_I)).ls_applied(:, i) = NaN;
+                            network.accfm_summary.busses(network.bus(buses_uvls_exceeded(l), BUS_I)).ls_applied(:, i) = [NaN; NaN];
                             network.accfm_summary.busses(network.bus(buses_uvls_exceeded(l), BUS_I)).status = FAILED;
                             network.accfm_summary.busses(network.bus(buses_uvls_exceeded(l), BUS_I)).failure_mode(i) = UVLS;
                         end
